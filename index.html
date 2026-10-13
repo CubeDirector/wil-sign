@@ -34,11 +34,7 @@
   label { display: block; font-weight: 600; margin: 16px 0 6px; }
   label:first-child { margin-top: 0; }
   .hint { font-weight: 400; color: var(--muted); font-size: .875rem; }
-  input[type=text], input[type=date] {
-    width: 100%; padding: 10px 12px; font: inherit; color: var(--text);
-    background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
-  }
-  input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .pad-wrap { position: relative; border: 1px solid var(--line); border-radius: 8px; background: #fff; overflow: hidden; }
   canvas { display: block; width: 100%; height: 200px; touch-action: none; cursor: crosshair; }
   .baseline { position: absolute; left: 24px; right: 24px; bottom: 48px; border-bottom: 1px dashed #c7c7c0; pointer-events: none; }
@@ -62,21 +58,12 @@
 
   <ol class="steps">
     <li>Read your project's agreement (link provided by your teacher).</li>
-    <li>Fill in your details below and sign in the box.</li>
+    <li>Sign in the box below.</li>
     <li>Click <strong>Download signature</strong>.</li>
-    <li>Upload the downloaded file in the Microsoft Form.</li>
+    <li>Complete the Microsoft Form and upload the downloaded file.</li>
   </ol>
 
   <form class="card" id="f" novalidate>
-    <label for="name">Student name <span class="hint">(as it should appear on the agreement)</span></label>
-    <input type="text" id="name" autocomplete="name" required>
-
-    <label for="num">Student number <span class="hint">(e.g. s1234567)</span></label>
-    <input type="text" id="num" autocomplete="off" inputmode="text" required>
-
-    <label for="date">Date</label>
-    <input type="date" id="date" required>
-
     <label id="sig-label">Signature <span class="hint">(mouse, finger or stylus)</span></label>
     <div class="pad-wrap">
       <canvas id="pad" aria-labelledby="sig-label" role="img"></canvas>
@@ -103,11 +90,6 @@
   const INK = '#0b1f5c';
   let strokes = [];   // array of arrays of {x, y} in CSS pixels
   let current = null;
-
-  // Default the date to today (local time), still editable.
-  const now = new Date();
-  const pad2 = n => String(n).padStart(2, '0');
-  document.getElementById('date').value = now.getFullYear() + '-' + pad2(now.getMonth() + 1) + '-' + pad2(now.getDate());
 
   // Backing store at least 3x so the exported image prints crisply.
   function scale() { return Math.max(3, window.devicePixelRatio || 1); }
@@ -173,7 +155,7 @@
   window.addEventListener('resize', resize);
   resize();
 
-  // ---- Export: trim to the ink, transparent background, metadata in PNG tEXt chunks ----
+  // ---- Export: trim to the ink, transparent background ----
 
   function trimmedCanvas() {
     const { width: w, height: h } = canvas;
@@ -197,76 +179,11 @@
     return out;
   }
 
-  const CRC_TABLE = (() => {
-    const t = new Uint32Array(256);
-    for (let n = 0; n < 256; n++) {
-      let c = n;
-      for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
-      t[n] = c >>> 0;
-    }
-    return t;
-  })();
-  function crc32(bytes) {
-    let c = 0xFFFFFFFF;
-    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
-    return (c ^ 0xFFFFFFFF) >>> 0;
-  }
-
-  // iTXt chunk (UTF-8), so names with accents survive.
-  function itxtChunk(key, value) {
-    const enc = new TextEncoder();
-    const k = enc.encode(key), v = enc.encode(value);
-    const body = new Uint8Array(4 + k.length + 5 + v.length);
-    body.set(enc.encode('iTXt'), 0);
-    body.set(k, 4);
-    // null separator, compression flag 0, method 0, empty language tag, empty translated keyword
-    let o = 4 + k.length;
-    body[o++] = 0; body[o++] = 0; body[o++] = 0; body[o++] = 0; body[o++] = 0;
-    body.set(v, o);
-    const chunk = new Uint8Array(8 + body.length);
-    const dv = new DataView(chunk.buffer);
-    dv.setUint32(0, body.length - 4);
-    chunk.set(body, 4);
-    dv.setUint32(4 + body.length, crc32(body));
-    return chunk;
-  }
-
-  function withMetadata(png, meta) {
-    // Insert after the IHDR chunk (8-byte signature + 25-byte IHDR).
-    const insertAt = 33;
-    const chunks = Object.entries(meta).map(([k, v]) => itxtChunk(k, v));
-    const total = png.length + chunks.reduce((a, c) => a + c.length, 0);
-    const out = new Uint8Array(total);
-    out.set(png.subarray(0, insertAt), 0);
-    let o = insertAt;
-    chunks.forEach(c => { out.set(c, o); o += c.length; });
-    out.set(png.subarray(insertAt), o);
-    return out;
-  }
-
-  function normaliseNumber(v) {
-    const m = v.trim().toLowerCase().match(/^s?(\d{7})$/);
-    return m ? 's' + m[1] : null;
-  }
-
   async function buildFile() {
-    const name = document.getElementById('name').value.trim().replace(/\s+/g, ' ');
-    const num = normaliseNumber(document.getElementById('num').value);
-    const date = document.getElementById('date').value;
-    const errors = [];
-    if (!name) errors.push('enter your name');
-    if (!num) errors.push('enter a valid student number (s followed by 7 digits)');
-    if (!date) errors.push('enter the date');
     const trimmed = trimmedCanvas();
-    if (!trimmed) errors.push('sign in the box');
-    if (errors.length) return { error: 'Please ' + errors.join(', ') + '.' };
-
+    if (!trimmed) return { error: 'Please sign in the box first.' };
     const blob = await new Promise(r => trimmed.toBlob(r, 'image/png'));
-    const png = new Uint8Array(await blob.arrayBuffer());
-    const bytes = withMetadata(png, {
-      StudentName: name, StudentNumber: num, Date: date, SignedAt: new Date().toISOString()
-    });
-    return { bytes, filename: num + '_signature.png' };
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), filename: 'signature.png' };
   }
   window.__buildSignatureFile = buildFile; // used for testing
 
